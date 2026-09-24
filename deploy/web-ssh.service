@@ -1,0 +1,18 @@
+[Unit]
+Description=Web SSH gateway (Go, single binary)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/web-ssh
+ExecStart=/opt/web-ssh/webssh
+Restart=on-failure
+RestartSec=3
+# 默认仅本机访问;需要对外暴露时取消下行注释
+# Environment=WEBSSH_LISTEN=0.0.0.0:23456
+# 超时调参(分钟)
+# Environment=WEBSSH_IDLE_MIN=10
+# Environment=WEBSSH_MAX_MIN=180
+
+[Install]
+WantedBy=multi-user.target
