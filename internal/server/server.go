@@ -4,6 +4,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,11 +32,12 @@ type Config struct {
 
 // Registry 活跃 SSH 会话注册表。
 type Registry struct {
-	cfg  Config
-	mu   sync.RWMutex
-	m    map[string]*sshx.Session
-	done chan struct{}
-	wg   sync.WaitGroup
+	cfg          Config
+	mu           sync.RWMutex
+	m            map[string]*sshx.Session
+	done         chan struct{}
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 }
 
 // NewRegistry 创建注册表并启动巡检协程(空闲/总寿命到期即回收)。
@@ -85,14 +87,16 @@ func (r *Registry) Remove(token string) {
 
 // Shutdown 停止巡检并清理所有会话。
 func (r *Registry) Shutdown() {
-	close(r.done)
-	r.wg.Wait()
-	r.mu.Lock()
-	for t, s := range r.m {
-		delete(r.m, t)
-		s.Close()
-	}
-	r.mu.Unlock()
+	r.shutdownOnce.Do(func() {
+		close(r.done)
+		r.wg.Wait()
+		r.mu.Lock()
+		for t, s := range r.m {
+			delete(r.m, t)
+			s.Close()
+		}
+		r.mu.Unlock()
+	})
 }
 
 func (r *Registry) reaper() {
@@ -161,7 +165,7 @@ func parseOrigin(o string) (string, error) {
 }
 
 // Handler 组装全部路由。
-func Handler(reg *Registry, version string, checkOrigin bool) http.Handler {
+func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin bool) http.Handler {
 	if checkOrigin {
 		upgrader.CheckOrigin = func(r *http.Request) bool {
 			// 严格同源:浏览器必须带 Origin 且与 Host 一致;非浏览器(无 Origin)允许。
@@ -182,7 +186,11 @@ func Handler(reg *Registry, version string, checkOrigin bool) http.Handler {
 
 	// 静态资源(单二进制 embed)
 	assetsFS, _ := fs.Sub(assets.FS, ".")
-	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS))))
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", noCache(http.FileServer(http.FS(assetsFS)))))
+
+	// SFTP 文件浏览器 API
+	fileAPI := NewFileAPI(fileReg)
+	fileAPI.Routes(mux)
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -202,6 +210,54 @@ func Handler(reg *Registry, version string, checkOrigin bool) http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"ok":true,"version":%q}`, version)
+	})
+
+	// GET /api/session:快捷链接入口。?host=&user=&port=&pass=b64&cmd=
+	// 密码 base64 编码(防肉眼),与 eooce/webssh 快捷链接语义一致。
+	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		host := q.Get("host")
+		user := q.Get("user")
+		if host == "" || user == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "快捷链接缺少 host 或 user 参数"})
+			return
+		}
+		port, _ := strconv.Atoi(q.Get("port"))
+		if port == 0 {
+			port = 22
+		}
+		pass := q.Get("pass")
+		if pass != "" {
+			// base64 解码
+			if b, err := base64.StdEncoding.DecodeString(pass); err == nil {
+				pass = string(b)
+			}
+		}
+		spec := sshx.ConnSpec{
+			Name:     q.Get("name"),
+			Host:     host,
+			Port:     port,
+			User:     user,
+			AuthType: "password",
+			Password: pass,
+			Command:  q.Get("cmd"),
+		}
+		if spec.Password == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "快捷链接需要 host/user/pass 参数"})
+			return
+		}
+		s, err := reg.Create(spec)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "SSH 连接失败: " + err.Error()})
+			return
+		}
+		log.Printf("[session] created(link) %s host=%s user=%s fp=%s", s.Token[:8], s.Spec.Host, s.Spec.User, s.Fingerprint)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":       s.Token,
+			"fingerprint": s.Fingerprint,
+			"host":        s.Spec.Host,
+			"user":        s.Spec.User,
+		})
 	})
 
 	// POST /api/session:创建 SSH 会话。凭据只在请求体内,不落 URL、不落盘。
@@ -250,6 +306,16 @@ func Handler(reg *Registry, version string, checkOrigin bool) http.Handler {
 	})
 
 	return mux
+}
+
+// noCache 禁止浏览器缓存静态资源:修复部署更新后客户端仍用旧版 JS 的问题。
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

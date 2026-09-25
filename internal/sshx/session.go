@@ -27,6 +27,7 @@ type ConnSpec struct {
 	PrivateKey  string `json:"privateKey,omitempty"`
 	Passphrase  string `json:"passphrase,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"` // sha256 主机指纹;空则 TOFU 首连捕获
+	Command     string `json:"command,omitempty"`     // 连接后自动执行(前端在 WS 建立后单独发送)
 }
 
 func (c *ConnSpec) addr() string {
@@ -51,10 +52,10 @@ type Session struct {
 	IdleTimeout time.Duration
 	MaxLifetime time.Duration
 
-	mu      sync.Mutex
+	mu       sync.Mutex
 	lastSeen time.Time
-	started time.Time
-	closed  bool
+	started  time.Time
+	closed   bool
 }
 
 func (s *Session) Touch() {

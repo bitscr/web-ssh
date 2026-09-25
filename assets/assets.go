@@ -6,5 +6,6 @@ import "embed"
 //go:embed all:css
 //go:embed all:js
 //go:embed all:vendor
+//go:embed all:img
 //go:embed index.html
 var FS embed.FS

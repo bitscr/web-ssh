@@ -39,7 +39,10 @@ func main() {
 	})
 	defer reg.Shutdown()
 
-	mux := server.Handler(reg, fmt.Sprintf("%s (%s)", version, buildDate), *noOrigin)
+	fileReg := server.NewFileRegistry()
+	defer fileReg.Shutdown()
+
+	mux := server.Handler(reg, fileReg, fmt.Sprintf("%s (%s)", version, buildDate), *noOrigin)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
