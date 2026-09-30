@@ -99,7 +99,7 @@ func Pump(ws *websocket.Conn, s *sshx.Session, reg *Registry) {
 			_ = ws.SetReadDeadline(time.Now().Add(readTimeout))
 			if mt == websocket.TextMessage {
 				msg := string(p)
-				if msg == "p" || msg == "ping" {
+				if msg == "ping" {
 					continue // 应用层心跳,忽略
 				}
 				if strings.HasPrefix(msg, "r:") {
@@ -143,6 +143,14 @@ func Pump(ws *websocket.Conn, s *sshx.Session, reg *Registry) {
 			}
 		}
 	}
+}
+
+func isTerminalControlMessage(messageType int, payload []byte) bool {
+	if messageType != websocket.TextMessage {
+		return false
+	}
+	msg := string(payload)
+	return msg == "ping" || strings.HasPrefix(msg, "r:")
 }
 
 // sanitizeUTF8 将非法 UTF-8 字节替换为 '@'(终端常有非 UTF8 输出)。

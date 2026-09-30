@@ -3,6 +3,8 @@
 package sshx
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -238,6 +240,56 @@ func (s *SFTPSession) WriteFile(p string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return f.Chmod(perm)
+}
+
+// AtomicWriteFile 在目标文件同目录写入临时文件，再通过 rename 覆盖目标，
+// 避免写入失败时留下半写文件。目标存在时尽量保留原权限。
+func (s *SFTPSession) AtomicWriteFile(p string, data []byte) error {
+	abs := s.resolve(p)
+	perm := os.FileMode(0o644)
+	if fi, err := s.client.Stat(abs); err == nil {
+		if fi.IsDir() {
+			return errors.New("目标路径是目录")
+		}
+		perm = fi.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err != nil {
+		return fmt.Errorf("生成临时文件名失败: %w", err)
+	}
+	tmp := path.Join(path.Dir(abs), "."+path.Base(abs)+".webssh-edit-"+hex.EncodeToString(random))
+	f, err := s.client.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		return err
+	}
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = s.client.Remove(tmp)
+		}
+	}()
+
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	// 标准 SFTP Rename 在部分服务器上不能覆盖已存在的目标文件，
+	// OpenSSH 的 posix-rename 扩展支持原子覆盖，适合在线编辑保存。
+	if err := s.client.PosixRename(tmp, abs); err != nil {
+		return fmt.Errorf("原子替换目标文件失败: %w", err)
+	}
+	keepTemp = false
+	return nil
 }
 
 // StreamUpload 流式写入远程文件(大文件上传)。返回已写字节数。

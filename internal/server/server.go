@@ -248,7 +248,7 @@ func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin b
 		}
 		s, err := reg.Create(spec)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "SSH 连接失败: " + err.Error()})
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "SSH 连接失败: " + err.Error()})
 			return
 		}
 		log.Printf("[session] created(link) %s host=%s user=%s fp=%s", s.Token[:8], s.Spec.Host, s.Spec.User, s.Fingerprint)
@@ -273,7 +273,7 @@ func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin b
 		}
 		s, err := reg.Create(spec)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "SSH 连接失败: " + err.Error()})
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "SSH 连接失败: " + err.Error()})
 			return
 		}
 		log.Printf("[session] created %s host=%s user=%s fp=%s", s.Token[:8], s.Spec.Host, s.Spec.User, s.Fingerprint)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,10 +21,23 @@ var (
 )
 
 func main() {
+	idleDefault := 10
+	if v := os.Getenv("WEBSSH_IDLE_MIN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			idleDefault = n
+		}
+	}
+	maxDefault := 180
+	if v := os.Getenv("WEBSSH_MAX_MIN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			maxDefault = n
+		}
+	}
+
 	var (
 		listen   = flag.String("listen", "", "监听地址 host:port(默认 127.0.0.1:23456,环境变量 WEBSSH_LISTEN 优先)")
-		idleMin  = flag.Int("idle", 10, "空闲超时(分钟),0 表示不限制")
-		maxMin   = flag.Int("max", 180, "会话总寿命(分钟),0 表示不限制")
+		idleMin  = flag.Int("idle", idleDefault, "空闲超时(分钟),0 表示不限制;环境变量 WEBSSH_IDLE_MIN")
+		maxMin   = flag.Int("max", maxDefault, "会话总寿命(分钟),0 表示不限制;环境变量 WEBSSH_MAX_MIN")
 		noOrigin = flag.Bool("no-origin-check", false, "关闭 WebSocket 同源校验(不推荐,仅反向代理场景需要)")
 	)
 	flag.Parse()

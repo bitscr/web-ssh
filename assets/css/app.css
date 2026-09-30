@@ -161,7 +161,7 @@ body {
 .main[style*="calc(100% - 54px)"] { flex-direction: row; }
 .term-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
 .sftp-pane {
-  width: 340px; min-width: 340px; max-width: 40%;
+  flex: 0 1 30%; width: 30%; min-width: 320px; max-width: 440px;
   border-left: 1px solid var(--border);
   background: rgba(22,27,34,.88);
   display: flex; flex-direction: column; height: 100%; overflow: hidden;
@@ -176,6 +176,47 @@ input[type=text], input[type=password], input[type=number], select, textarea {
   width: 100%; padding: 8px 10px;
   background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
   color: var(--text); font-size: 13px; font-family: inherit;
+}
+
+.password-input {
+  position: relative;
+  width: 100%;
+}
+.password-input input {
+  padding-right: 42px;
+}
+.password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  cursor: pointer;
+}
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  color: var(--text);
+  background: rgba(255,255,255,.05);
+}
+.password-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.password-eye {
+  display: block;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
@@ -276,7 +317,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .ftp-headrow,
 .ftp-row {
   display: grid;
-  grid-template-columns: 32px 1fr 90px 150px auto;
+  grid-template-columns: 32px minmax(0, 1fr) 90px 150px max-content;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
@@ -295,6 +336,49 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .ftp-row.dir { cursor: pointer; }
 .ftp-row .ftp-icon { font-size: 16px; }
 .ftp-row .ftp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftp-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex-wrap: nowrap; min-width: max-content; }
+.ftp-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
+.ftp-edit-screen { z-index: 120; }
+.ftp-edit-card {
+  width: min(900px, 94vw) !important;
+  max-width: 94vw !important;
+  height: min(760px, 90vh);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 18px !important;
+}
+.ftp-edit-head { display: flex; align-items: center; gap: 10px; }
+.ftp-edit-head h3 { margin: 0; }
+.ftp-edit-head .spacer { flex: 1; }
+.ftp-edit-path {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel2);
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ftp-edit-meta { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.ftp-edit-content {
+  flex: 1;
+  min-height: 320px;
+  width: 100%;
+  resize: none;
+  box-sizing: border-box;
+  padding: 12px;
+  color: var(--text);
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  tab-size: 2;
+}
+.ftp-edit-card .err-banner { margin: 10px 0 0; }
+.ftp-edit-card .footer { margin-top: 12px; }
 .ftp-row .ftp-size, .ftp-row .ftp-time { color: var(--muted); font-size: 14px; }
 .ftp-row .ftp-actions { text-align: right; white-space: nowrap; }
 .ftp-row .ftp-actions .btn { padding: 3px 7px; font-size: 13px; margin-left: 3px; }
@@ -302,7 +386,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 /* 嵌入式右侧面板:面板窄,用紧凑网格(隐藏时间列) */
 .sftp-pane .ftp-headrow,
 .sftp-pane .ftp-row {
-  grid-template-columns: 24px 1fr 62px auto;
+  grid-template-columns: 24px minmax(0, 1fr) 58px max-content;
   gap: 6px;
   padding: 6px;
 }
@@ -310,13 +394,15 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .sftp-pane .ftp-row .ftp-time { display: none; }
 .sftp-pane .ftp-headrow .h-size,
 .sftp-pane .ftp-row .ftp-size { font-size: 13px; }
-.sftp-pane .ftp-row .ftp-actions .btn { padding: 3px 5px; font-size: 12px; margin-left: 2px; }
+.sftp-pane .ftp-row .ftp-actions .btn { min-height: 30px !important; padding: 4px 6px !important; font-size: 11px !important; margin-left: 0; }
+.sftp-pane .ftp-row .ftp-actions .ftp-action-icon { width: 30px; padding: 4px !important; }
 .sftp-pane .ftp-pathrow .ftp-path-input { font-size: 13px; padding: 6px 7px; }
 .sftp-pane .ftp-toolbar .btn { padding: 5px 7px; font-size: 13px; }
 .sftp-pane .ftp-toolbar { gap: 4px; }
 
 /* ---------- 移动端适配 ---------- */
 @media (max-width: 640px) {
+  .sftp-pane { flex: 1 1 auto; width: 100%; min-width: 0; max-width: none; }
   body {
     background-attachment: scroll;
     font-size: 15px;
@@ -411,4 +497,87 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
   .ftp-toolbar { gap: 4px; }
   .ftp-toolbar .btn { padding: 5px 8px; font-size: 12px; }
   .ftp-body { min-height: 50vh; }
+}
+
+/* FTP/SFTP control system */
+#ftp-panel, #ftp-screen, #ftp-edit-screen {
+  --ftp-control-h: 34px;
+  --ftp-control-radius: 7px;
+  --ftp-control-font: 13px;
+}
+#ftp-panel .btn, #ftp-screen .btn, #ftp-edit-screen .btn {
+  box-sizing: border-box;
+  min-height: var(--ftp-control-h);
+  padding: 6px 11px;
+  border-radius: var(--ftp-control-radius);
+  font-size: var(--ftp-control-font);
+  line-height: 1.2;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: border-color .14s ease, background-color .14s ease, color .14s ease, transform .08s ease, opacity .14s ease;
+}
+#ftp-panel .btn:hover:not(:disabled), #ftp-screen .btn:hover:not(:disabled), #ftp-edit-screen .btn:hover:not(:disabled) {
+  border-color: #58a6ff;
+  background: #212a35;
+}
+#ftp-panel .btn:active:not(:disabled), #ftp-screen .btn:active:not(:disabled), #ftp-edit-screen .btn:active:not(:disabled) {
+  transform: translateY(1px);
+  background: #18202a;
+}
+#ftp-panel .btn:focus-visible, #ftp-screen .btn:focus-visible, #ftp-edit-screen .btn:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+#ftp-panel .btn:disabled, #ftp-screen .btn:disabled, #ftp-edit-screen .btn:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+  transform: none;
+}
+#ftp-panel .btn.danger, #ftp-screen .btn.danger {
+  color: #ff7b72;
+  border-color: rgba(248,81,73,.48);
+}
+#ftp-panel .btn.danger:hover:not(:disabled), #ftp-screen .btn.danger:hover:not(:disabled) {
+  background: rgba(248,81,73,.14);
+  border-color: #f85149;
+}
+.ftp-toolbar { gap: 8px; padding: 10px 0; }
+.ftp-toolbar .btn { min-height: 38px !important; padding: 7px 13px !important; font-size: 14px !important; }
+.ftp-head, .ftp-embed-head { gap: 10px; }
+.ftp-pathrow { gap: 8px; }
+.ftp-row { min-height: 46px; padding: 7px 8px; }
+.ftp-row:hover { background: rgba(88,166,255,.07); }
+.ftp-actions { gap: 6px; flex-wrap: nowrap; }
+.ftp-actions .btn { min-height: 32px !important; padding: 5px 9px !important; font-size: 12px !important; }
+.ftp-actions .ftp-action-icon { width: 32px; padding: 5px !important; }
+.ftp-btn-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (max-width: 640px) {
+  #ftp-panel, #ftp-screen, #ftp-edit-screen { --ftp-control-h: 40px; --ftp-control-font: 13px; }
+  .ftp-card { height: 100dvh; max-height: 100dvh !important; display: flex; flex-direction: column; overflow: hidden !important; }
+  .ftp-head { flex-wrap: wrap; flex: 0 0 auto; }
+  .ftp-head h3 { max-width: calc(100% - 48px); }
+  .ftp-toolbar { gap: 7px; padding: 8px 0; }
+  .ftp-toolbar .spacer { display: none; }
+  .ftp-toolbar .btn { min-height: 42px !important; flex: 1 1 calc(50% - 4px); padding: 8px 10px !important; font-size: 13px !important; }
+  .ftp-pathrow { flex: 0 0 auto; }
+  .ftp-body { flex: 1 1 auto; min-height: 0; }
+  .ftp-row { min-height: 52px; padding: 7px 6px; }
+  .ftp-actions { gap: 5px; overflow-x: auto; scrollbar-width: none; }
+  .ftp-actions::-webkit-scrollbar { display: none; }
+  .ftp-actions .btn { min-height: 40px !important; padding: 7px 9px !important; font-size: 12px !important; flex: 0 0 auto; }
+  .ftp-actions .ftp-action-icon { width: 40px; padding: 7px !important; }
+  .ftp-btn-icon { width: 17px; height: 17px; flex-basis: 17px; }
+  .ftp-edit-card { height: 100dvh; max-height: 100dvh !important; width: 100vw !important; max-width: 100vw !important; border-radius: 0 !important; }
 }

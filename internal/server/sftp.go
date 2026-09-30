@@ -9,9 +9,45 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/bitscr/web-ssh/internal/sshx"
 )
+
+const sftpEditMaxBytes = 1 << 20
+
+func validateEditableContent(data []byte) error {
+	if len(data) > sftpEditMaxBytes {
+		return errors.New("文件超过 1 MiB，禁止在线编辑")
+	}
+	if !utf8.Valid(data) {
+		return errors.New("文件不是有效的 UTF-8 文本，无法在线编辑")
+	}
+	if bytesIndexByte(data, 0) >= 0 {
+		return errors.New("检测到二进制文件，无法在线编辑")
+	}
+	if len(data) > 0 {
+		controls := 0
+		for _, b := range data {
+			if b < 0x20 && b != '\n' && b != '\r' && b != '	' {
+				controls++
+			}
+		}
+		if controls*10 > len(data) {
+			return errors.New("检测到二进制文件，无法在线编辑")
+		}
+	}
+	return nil
+}
+
+func bytesIndexByte(data []byte, target byte) int {
+	for i, b := range data {
+		if b == target {
+			return i
+		}
+	}
+	return -1
+}
 
 // FileRegistry 管理 SFTP 文件浏览器会话。每个连接一个,按 token 索引。
 type FileRegistry struct {
@@ -83,6 +119,14 @@ func (api *FileAPI) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sftp/rename", api.Rename)
 	mux.HandleFunc("POST /api/sftp/mkdir", api.Mkdir)
 	mux.HandleFunc("GET /api/sftp/stat", api.Stat)
+	mux.HandleFunc("GET /api/sftp/edit", api.ReadEdit)
+	mux.HandleFunc("POST /api/sftp/edit", api.SaveEdit)
+	methodNotAllowed := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持的请求方法"})
+	}
+	mux.HandleFunc("PUT /api/sftp/edit", methodNotAllowed)
+	mux.HandleFunc("PATCH /api/sftp/edit", methodNotAllowed)
+	mux.HandleFunc("DELETE /api/sftp/edit", methodNotAllowed)
 }
 
 // withSftp 从 query/form 取 token 并解析会话。
@@ -295,6 +339,88 @@ func (api *FileAPI) Mkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
+}
+
+// ReadEdit 读取可在线编辑的 UTF-8 文本文件。
+func (api *FileAPI) ReadEdit(w http.ResponseWriter, r *http.Request) {
+	s, err := api.withSftp(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path 不能为空"})
+		return
+	}
+	info, err := s.Stat(path)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "读取文件信息失败: " + err.Error()})
+		return
+	}
+	if info.IsDir {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "目录不能在线编辑"})
+		return
+	}
+	if info.Size > sftpEditMaxBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "文件超过 1 MiB，禁止在线编辑"})
+		return
+	}
+	data, err := s.ReadFile(path)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "读取文件失败: " + err.Error()})
+		return
+	}
+	if err := validateEditableContent(data); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": info.Path, "size": len(data), "content": string(data)})
+}
+
+// SaveEdit 校验并以同目录临时文件加 rename 的方式覆盖原文件。
+func (api *FileAPI) SaveEdit(w http.ResponseWriter, r *http.Request) {
+	s, err := api.withSftp(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, sftpEditMaxBytes+64<<10))
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体无效或超过大小限制: " + err.Error()})
+		return
+	}
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path 不能为空"})
+		return
+	}
+	data := []byte(req.Content)
+	if err := validateEditableContent(data); err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error()})
+		return
+	}
+	info, err := s.Stat(req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "读取文件信息失败: " + err.Error()})
+		return
+	}
+	if info.IsDir {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "目录不能在线编辑"})
+		return
+	}
+	if info.Size > sftpEditMaxBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "原文件超过 1 MiB，禁止在线编辑"})
+		return
+	}
+	if err := s.AtomicWriteFile(req.Path, data); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "保存文件失败: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size": len(data)})
 }
 
 // safeFilename 去掉路径分隔符,防止文件名注入。

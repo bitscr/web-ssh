@@ -19,6 +19,19 @@
     ftp: null              // {token, cwd, entries} SFTP 文件管理器状态
   };
 
+  function parseApiResponse(res) {
+    return res.text().then(function (text) {
+      var j;
+      try {
+        j = JSON.parse(text);
+      } catch (e) {
+        var detail = text.trim().replace(/\s+/g, ' ').slice(0, 160);
+        throw new Error('服务器响应异常（HTTP ' + res.status + '）' + (detail ? '：' + detail : ''));
+      }
+      return { ok: res.ok, j: j };
+    });
+  }
+
   function loadConns() {
     try {
       var raw = localStorage.getItem(LS_KEY);
@@ -90,6 +103,7 @@
     el('btn-new').addEventListener('click', openEditor);
     bindConnList();
     bindHomeForm();
+    enhancePasswordFields(app);
   }
 
   // 已保存连接列表 HTML
@@ -117,6 +131,8 @@
       '<div class="home-form-head"><h2>🚀 快速连接</h2>' +
       '<div class="muted" style="font-size:12px">填写连接信息,点击"连接"自动保存并新开标签页</div></div>' +
       '<div class="err-banner" id="home-err" style="display:none"></div>' +
+      '<div class="field"><label>名称(可留空,默认用主机名)</label>' +
+      '<input type="text" id="h-name" placeholder="例如:我的 VPS" autocomplete="off"></div>' +
       '<div class="home-form-grid">' +
       '<div class="field"><label>主机地址</label>' +
       '<input type="text" id="h-host" placeholder="example.com 或 1.2.3.4" autocomplete="off"></div>' +
@@ -158,7 +174,7 @@
     });
     el('h-connect').addEventListener('click', quickConnect);
     // 回车提交
-    ['h-host', 'h-user', 'h-port', 'h-pass', 'h-cmd', 'h-passphrase'].forEach(function (id) {
+    ['h-name', 'h-host', 'h-user', 'h-port', 'h-pass', 'h-cmd', 'h-passphrase'].forEach(function (id) {
       el(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') quickConnect(); });
     });
   }
@@ -167,6 +183,7 @@
   function quickConnect() {
     var errBox = el('home-err');
     errBox.style.display = 'none';
+    var name = el('h-name').value.trim();
     var host = el('h-host').value.trim();
     var user = el('h-user').value.trim() || 'root';
     var port = parseInt(el('h-port').value, 10) || 22;
@@ -183,7 +200,7 @@
 
     // 先建会话验证凭据(成功才保存)
     var spec = {
-      name: host, host: host, port: port, user: user,
+      name: name || host, host: host, port: port, user: user,
       authType: authType, command: command
     };
     if (authType === 'key') {
@@ -196,13 +213,13 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(spec)
-    }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+    }).then(parseApiResponse)
       .then(function (r) {
         if (!r.ok) throw new Error(r.j.error || '连接失败');
 
         // 保存连接到左侧列表
         var conn = {
-          id: uid(), name: host, host: host, port: port, user: user,
+          id: uid(), name: name || host, host: host, port: port, user: user,
           authType: authType, command: command,
           savePass: savePass
         };
@@ -225,7 +242,7 @@
         // 新标签页打开终端(带 spec,但凭据已含)
         var proto = location.protocol === 'https:' ? 'wss' : 'ws';
         var url = location.origin + location.pathname + '#conn=' + encodeURIComponent(JSON.stringify({
-          host: host, port: port, user: user, authType: authType,
+          name: name || host, host: host, port: port, user: user, authType: authType,
           password: password, privateKey: privateKey, passphrase: passphrase, command: command
         }));
         var w = window.open(url, '_blank');
@@ -279,6 +296,7 @@
     var div = document.createElement('div');
     div.innerHTML = html;
     app.appendChild(div.firstChild);
+    enhancePasswordFields(el('editor-screen'));
 
     el('f-auth').addEventListener('change', function () {
       var key = el('f-auth').value === 'key';
@@ -363,6 +381,10 @@
 
   function showErr(box, msg) { box.textContent = msg; box.style.display = 'block'; }
 
+  function enhancePasswordFields(root) {
+    if (window.PasswordVisibility) window.PasswordVisibility.enhancePasswordFields(root);
+  }
+
   function removeConn(id) {
     if (!confirm('删除该连接?')) return;
     clearSavedPass(id);
@@ -421,6 +443,7 @@
     }
     var params = new URLSearchParams();
     params.set('host', conn.host);
+    if (conn.name) params.set('name', conn.name);
     params.set('user', conn.user);
     params.set('port', conn.port || 22);
     params.set('pass', btoa(unescape(encodeURIComponent(pass)))); // UTF-8 安全 btoa
@@ -480,8 +503,6 @@
       authType: 'password', password: pass,
       command: q.get('cmd') || ''
     };
-    // 清掉 URL 里的凭据,避免留在地址栏/历史
-    history.replaceState(null, '', location.pathname);
     openTerminal(spec, { id: 'url', authType: 'password', savePass: false });
   }
 
@@ -558,7 +579,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(spec)
-    }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+    }).then(parseApiResponse)
       .then(function (r) {
         if (!r.ok) throw new Error(r.j.error || '会话创建失败');
         var sess = r.j;
@@ -606,7 +627,7 @@
     // 应用层心跳:每 20s 发一个文本帧,防止浏览器后台标签页/节能模式
     // 暂停 Pong(或反向代理吞掉 WS 控制帧)导致服务端误判断线。
     var hbTimer = setInterval(function () {
-      if (ws.readyState === WebSocket.OPEN) ws.send('p');
+      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, 20000);
     ws.addEventListener('close', function () { clearInterval(hbTimer); });
 
@@ -687,7 +708,7 @@
         '<button class="btn sm" id="ftp-refresh">⟳</button></div>' +
         '<div class="err-banner" id="ftp-err" style="display:none"></div>' +
         '<div class="ftp-toolbar">' +
-        '<button class="btn sm" id="ftp-up">⬆</button>' +
+        '<button class="btn sm" id="ftp-up">返回上一级</button>' +
         '<button class="btn sm" id="ftp-newdir">+ 目录</button>' +
         '<button class="btn sm primary" id="ftp-upload">⬆ 上传</button>' +
         '<span class="spacer"></span>' +
@@ -706,7 +727,7 @@
         '<button class="btn sm" id="ftp-close">✕</button></div>' +
         '<div class="err-banner" id="ftp-err" style="display:none"></div>' +
         '<div class="ftp-toolbar">' +
-        '<button class="btn sm" id="ftp-up">⬆ 上级</button>' +
+        '<button class="btn sm" id="ftp-up">返回上一级</button>' +
         '<button class="btn sm" id="ftp-refresh">⟳ 刷新</button>' +
         '<button class="btn sm" id="ftp-newdir">+ 新建目录</button>' +
         '<button class="btn sm primary" id="ftp-upload">⬆ 上传</button>' +
@@ -765,7 +786,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(spec)
-      }).then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+      }).then(parseApiResponse)
         .then(function (r) {
           if (!r.ok) throw new Error(r.j.error || 'SFTP 连接失败');
           state.ftp = { token: r.j.token, cwd: '/', entries: [], embedded: embedded };
@@ -801,8 +822,9 @@
         '<span class="ftp-size">' + (e.isDir ? '-' : fmtSize(e.size)) + '</span>' +
         '<span class="ftp-time">' + fmtTime(e.modTime) + '</span>' +
         '<span class="ftp-actions">' +
-        (e.isDir ? '' : '<button class="btn sm" data-act="download">⬇</button>') +
-        '<button class="btn sm" data-act="rename">✎</button>' +
+        (e.isDir ? '' : '<button class="btn sm ftp-action-icon" data-act="download" title="下载" aria-label="下载"><svg class="ftp-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 18v2h14v-2"/></svg></button>') +
+        (e.isDir ? '' : '<button class="btn sm" data-act="edit" data-size="' + e.size + '" title="' + (e.size > 1048576 ? '文件超过 1 MiB，禁止在线编辑' : '编辑') + '"' + (e.size > 1048576 ? ' disabled' : '') + '>编辑</button>') +
+        '<button class="btn sm" data-act="rename" title="重命名">重命名</button>' +
         '<button class="btn sm danger" data-act="del">✕</button>' +
         '</span></div>';
     }).join('');
@@ -819,6 +841,7 @@
           e.stopPropagation();
           var act = b.dataset.act;
           if (act === 'download') ftpDownload(path);
+          if (act === 'edit') ftpEdit(path, Number(b.dataset.size || 0));
           if (act === 'rename') ftpRename(path);
           if (act === 'del') ftpDelete(path);
         });
@@ -843,10 +866,20 @@
     var opts = { method: method };
     if (body) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
     return fetch(url, opts).then(function (res) {
-      return res.json().then(function (j) {
-        if (!res.ok) throw new Error(j.error || '请求失败');
+      return res.text().then(function (text) {
+        var j;
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          var detail = text.trim().replace(/\s+/g, ' ').slice(0, 160);
+          throw new Error('服务器响应异常（HTTP ' + res.status + '）' + (detail ? '：' + detail : ''));
+        }
+        if (!res.ok) throw new Error(j.error || ('请求失败（HTTP ' + res.status + '）'));
         return j;
       });
+    }).catch(function (err) {
+      if (err instanceof TypeError) throw new Error('网络请求失败，请检查连接后重试');
+      throw err;
     });
   }
 
@@ -859,16 +892,76 @@
 
   function ftpDelete(path) {
     if (!confirm('删除 ' + path + ' ?')) return;
-    ftpApi('POST', '/api/sftp/delete', { path: path, token: state.ftp.token })
+    ftpApi('POST', '/api/sftp/delete?token=' + encodeURIComponent(state.ftp.token), { path: path })
       .then(function () { ftpList(state.ftp.cwd); })
       .catch(function (err) { showFtpErr(err.message); });
+  }
+
+  function ftpEdit(path, size) {
+    if (size > 1048576) {
+      showFtpErr('文件超过 1 MiB，禁止在线编辑');
+      return;
+    }
+    var ftp = state.ftp;
+    if (!ftp) return;
+    ftpApi('GET', '/api/sftp/edit?token=' + encodeURIComponent(ftp.token) + '&path=' + encodeURIComponent(path))
+      .then(function (j) { openFtpEditor(j.path || path, j.content || '', Number(j.size || 0)); })
+      .catch(function (err) { showFtpErr(err.message); });
+  }
+
+  function openFtpEditor(path, content, size) {
+    var old = el('ftp-edit-screen');
+    if (old) old.remove();
+    var screen = document.createElement('div');
+    screen.id = 'ftp-edit-screen';
+    screen.className = 'screen open ftp-edit-screen';
+    screen.innerHTML = '<div class="card ftp-edit-card">' +
+      '<div class="ftp-edit-head"><h3>编辑文件</h3><span class="spacer"></span><span class="muted">最大 1 MiB</span></div>' +
+      '<div class="ftp-edit-path" title="' + esc(path) + '">' + esc(path) + '</div>' +
+      '<div class="ftp-edit-meta">当前大小：<span id="ftp-edit-size">' + fmtSize(size) + '</span></div>' +
+      '<textarea id="ftp-edit-content" class="ftp-edit-content" spellcheck="false"></textarea>' +
+      '<div id="ftp-edit-err" class="err-banner" style="display:none"></div>' +
+      '<div class="footer"><button id="ftp-edit-cancel" class="btn">取消</button><button id="ftp-edit-save" class="btn primary">保存</button></div>' +
+      '</div>';
+    document.body.appendChild(screen);
+    var textarea = el('ftp-edit-content');
+    var save = el('ftp-edit-save');
+    textarea.value = content;
+    textarea.focus();
+    textarea.addEventListener('input', function () {
+      var bytes = new Blob([textarea.value]).size;
+      el('ftp-edit-size').textContent = fmtSize(bytes);
+      save.disabled = bytes > 1048576;
+      if (bytes > 1048576) showFtpEditorErr('内容超过 1 MiB，无法保存');
+    });
+    el('ftp-edit-cancel').onclick = function () { screen.remove(); };
+    save.onclick = function () {
+      var bytes = new Blob([textarea.value]).size;
+      if (bytes > 1048576) { showFtpEditorErr('内容超过 1 MiB，无法保存'); return; }
+      save.disabled = true;
+      save.textContent = '保存中...';
+      ftpApi('POST', '/api/sftp/edit?token=' + encodeURIComponent(state.ftp.token), { path: path, content: textarea.value })
+        .then(function () { screen.remove(); ftpList(state.ftp.cwd); })
+        .catch(function (err) {
+          showFtpEditorErr(err.message);
+          save.disabled = false;
+          save.textContent = '保存';
+        });
+    };
+  }
+
+  function showFtpEditorErr(msg) {
+    var banner = el('ftp-edit-err');
+    if (!banner) return;
+    banner.textContent = msg;
+    banner.style.display = 'block';
   }
 
   function ftpRename(path) {
     var newName = prompt('新名称(可含路径):', path.split('/').pop());
     if (!newName) return;
     var dir = path.slice(0, path.lastIndexOf('/') + 1);
-    ftpApi('POST', '/api/sftp/rename', { old: path, new: dir + newName, token: state.ftp.token })
+    ftpApi('POST', '/api/sftp/rename?token=' + encodeURIComponent(state.ftp.token), { old: path, new: dir + newName })
       .then(function () { ftpList(state.ftp.cwd); })
       .catch(function (err) { showFtpErr(err.message); });
   }
@@ -912,7 +1005,6 @@
     };
     if (hspec.authType === 'key') { hspec.privateKey = hashConn.privateKey || ''; hspec.passphrase = hashConn.passphrase || ''; }
     else { hspec.password = hashConn.password || ''; }
-    history.replaceState(null, '', location.pathname); // 清哈希
     openTerminal(hspec, { id: 'hash', authType: hspec.authType, savePass: false });
   } else if (new URLSearchParams(location.search).get('host')) {
     connectFromUrl(); // 快捷链接直达
