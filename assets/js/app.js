@@ -658,6 +658,12 @@
     };
     ws.onerror = function () { setStatus('WebSocket 错误', true); };
 
+    // 保留浏览器刷新快捷键，避免 xterm 将 F5 转成终端输入。
+    term.attachCustomKeyEventHandler(function (ev) {
+      if (ev.type === 'keydown' && ev.key === 'F5') return false;
+      return true;
+    });
+
     // 输入 → WS
     term.onData(function (data) {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);

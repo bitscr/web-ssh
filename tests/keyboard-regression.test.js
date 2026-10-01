@@ -54,3 +54,10 @@ test('终端获得焦点时小写 p 通过 onData 发送到 WebSocket', () => {
   term.handler('p');
   assert.deepEqual(sent, ['p']);
 });
+
+test('F5 由浏览器处理，不发送到 SSH 终端', () => {
+  const appSource = fs.readFileSync('assets/js/app.js', 'utf8');
+  assert.match(appSource, /attachCustomKeyEventHandler/);
+  assert.match(appSource, /ev\.key === 'F5'/);
+  assert.match(appSource, /return false/);
+});
