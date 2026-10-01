@@ -28,10 +28,11 @@ body {
   font-size: 16px;
   line-height: 1.55;
 }
-#app { height: 100%; }
+#app { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 
 /* 顶部栏 */
 .topbar {
+  flex: 0 0 auto;
   display: flex; align-items: center; gap: 12px;
   padding: 10px 18px;
   background: rgba(22,27,34,.72); border-bottom: 1px solid var(--border);
@@ -64,7 +65,8 @@ body {
   grid-template-columns: minmax(0, 1fr) 340px;
   grid-template-areas: "main sidebar";
   gap: 22px;
-  height: calc(100% - 67px);
+  flex: 1 1 auto;
+  min-height: 0;
   max-width: 1280px;
   margin: 0 auto;
   padding: 26px;
@@ -82,8 +84,9 @@ body {
   backdrop-filter: blur(18px);
 }
 .main {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -158,7 +161,7 @@ body {
 }
 
 /* 终端 + SFTP 分栏(桌面) */
-.main[style*="calc(100% - 54px)"] { flex-direction: row; }
+.main.term-main { flex-direction: row; }
 .term-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
 .sftp-pane {
   flex: 0 1 30%; width: 30%; min-width: 320px; max-width: 440px;
@@ -397,6 +400,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .sftp-pane .ftp-row .ftp-actions .btn { min-height: 30px !important; padding: 4px 6px !important; font-size: 11px !important; margin-left: 0; }
 .sftp-pane .ftp-row .ftp-actions .ftp-action-icon { width: 30px; padding: 4px !important; }
 .sftp-pane .ftp-pathrow .ftp-path-input { font-size: 13px; padding: 6px 7px; }
+.sftp-pane .ftp-body { min-height: 0; }
 .sftp-pane .ftp-toolbar .btn { padding: 5px 7px; font-size: 13px; }
 .sftp-pane .ftp-toolbar { gap: 4px; }
 
@@ -423,8 +427,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
     grid-template-columns: 1fr;
     grid-template-areas: "main" "sidebar";
     gap: 12px;
-    height: auto;
-    min-height: calc(100vh - 52px);
+    min-height: 0;
     padding: 12px;
     overflow-y: auto;
   }
@@ -464,11 +467,8 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
   /* 终端状态栏 */
   .term-statusbar { padding: 6px 10px; font-size: 11px; }
 
-  /* 终端主区: 顶栏可能换行,改用视口高度而非 54px */
+  /* 终端主区: 顶栏换行时高度由 flex 自动收缩 */
   #status { display: none; }
-  .main[style*="calc(100% - 54px)"] {
-    height: calc(100vh - 96px) !important;
-  }
 
   /* 刘海/圆角屏安全区 */
   .topbar { padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
@@ -581,3 +581,26 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
   .ftp-btn-icon { width: 17px; height: 17px; flex-basis: 17px; }
   .ftp-edit-card { height: 100dvh; max-height: 100dvh !important; width: 100vw !important; max-width: 100vw !important; border-radius: 0 !important; }
 }
+/* ---------- 滚动条:统一细窄暗色,避免默认亮色滚动条破坏暗色主题 ---------- */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.16);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.30); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* xterm 默认 overflow-y:scroll 会常驻一条滚动条;改为按需显示 */
+.xterm .xterm-viewport { overflow-y: auto; }
+.xterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.20);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.34); background-clip: padding-box; }

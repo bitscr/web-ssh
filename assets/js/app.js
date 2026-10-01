@@ -559,7 +559,7 @@
       '<span id="status" class="muted" style="font-size:12px">连接中...</span>' +
       '<button class="btn primary" id="btn-recon" style="display:none">重连</button>' +
       '</div>' +
-      '<div class="main" style="height:calc(100% - 54px)">' +
+      '<div class="main term-main">' +
       '<div class="term-col">' +
       '<div class="term-wrap"><div id="terminal"></div></div>' +
       '<div class="term-statusbar"><span class="dot" id="dot"></span><span id="sbar">正在建立 SSH 会话...</span></div>' +
