@@ -4,6 +4,12 @@
 
   // ---------- 存储 ----------
   // 必须在初始化 state 前赋值，否则 loadConns() 首次执行时 LS_KEY 为 undefined。
+  //
+  // 凭据存储模型(全部只存在浏览器 localStorage,不上服务端):
+  //   webssh.conns.v1   连接列表。密码认证时不含密码;私钥认证时含 privateKey/passphrase。
+  //   webssh.pass.<id>  密码认证的密码,单独键存,受"记住密码"开关控制。
+  // 注意:私钥/私钥口令不做单独键,直接随 conns 持久化,所以"导出"能带出完整信息;
+  // 也意味着任何能打开本浏览器开发者工具的人都能看到私钥明文。这是有意的取舍。
   var LS_KEY = 'webssh.conns.v1';
   var LS_PASS_PREFIX = 'webssh.pass.';
   var LS_PASS_SAVE = 'webssh.savePass';
@@ -231,7 +237,7 @@
           if (!savePass) clearSavedPass(conn.id);
         } else {
           conn.hasPass = false;
-          conn.privateKey = privateKey; // 内存态
+          conn.privateKey = privateKey; // 随 conns 落 localStorage,见顶部存储模型
           conn.passphrase = passphrase;
         }
         state.conns.push(conn);
@@ -363,7 +369,7 @@
     } else {
       conn.hasPass = false;
       conn.keyName = privateKey.trim().slice(0, 40) + '...';
-      conn.privateKey = privateKey;           // 内存态,不持久化
+      conn.privateKey = privateKey;           // 随 conns 落 localStorage,见顶部存储模型
       conn.passphrase = passphrase;
     }
 

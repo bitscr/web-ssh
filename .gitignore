@@ -1,0 +1,3 @@
+# go build 产物（在仓库根直接编译时生成，不入库）
+/webssh
+/webssh-*
