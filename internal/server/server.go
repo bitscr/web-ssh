@@ -184,9 +184,11 @@ func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin b
 	}
 	mux := http.NewServeMux()
 
-	// 静态资源(单二进制 embed)
+	// 静态资源(单二进制 embed):带 ?v= 的资源 gzip 压缩 + 7 天缓存,
+	// 不带版本参数的保持 no-store。
 	assetsFS, _ := fs.Sub(assets.FS, ".")
-	mux.Handle("GET /assets/", http.StripPrefix("/assets/", noCache(http.FileServer(http.FS(assetsFS)))))
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/",
+		staticHandler(http.FileServer(http.FS(assetsFS)))))
 
 	// SFTP 文件浏览器 API
 	fileAPI := NewFileAPI(fileReg)
@@ -204,6 +206,8 @@ func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin b
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// 首页带版本号引用静态资源,HTML 本身必须每次回源,否则用户会卡在旧版本上
+		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(b)
 	})
 
@@ -306,16 +310,6 @@ func Handler(reg *Registry, fileReg *FileRegistry, version string, checkOrigin b
 	})
 
 	return mux
-}
-
-// noCache 禁止浏览器缓存静态资源:修复部署更新后客户端仍用旧版 JS 的问题。
-func noCache(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
