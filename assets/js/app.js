@@ -95,6 +95,7 @@
     app.innerHTML =
       '<div class="topbar"><span class="logo">Web<b>SSH</b></span>' +
       '<span class="spacer"></span>' +
+      '<button class="btn" id="btn-import" title="从导出的 JSON 备份恢复连接（纯本地解析，不经过服务端）">⬆ 导入</button>' +
       '<button class="btn" id="btn-export" title="导出本浏览器保存的全部连接信息（含密码/私钥，纯本地生成，不经过服务端）">⬇ 导出</button>' +
       '<button class="btn primary" id="btn-new">+ 新建连接</button></div>' +
       '<div class="split">' +
@@ -108,6 +109,7 @@
 
     // 事件
     el('btn-new').addEventListener('click', openEditor);
+    el('btn-import').addEventListener('click', importLocalData);
     el('btn-export').addEventListener('click', exportLocalData);
     bindConnList();
     bindHomeForm();
@@ -561,6 +563,115 @@
       conns: conns
     };
     downloadTextFile('webssh-conns-' + tsStamp() + '.json', JSON.stringify(payload, null, 2));
+  }
+
+  // ---------- 导入本地连接信息 ----------
+  // 与导出对称:文件在浏览器里读、在浏览器里解析,只写 localStorage,
+  // 全程不发起任何网络请求,内容不会离开这台机器。
+  var MAX_IMPORT_CONNS = 500;
+
+  // 判定"同一条连接"的依据;命中即视为重复,导入时跳过而不是再堆一条
+  function connSignature(c) {
+    return [c.host, c.port, c.user, c.authType, c.name].join('|');
+  }
+
+  function readFileText(file, onOk, onErr) {
+    var fr = new FileReader();
+    fr.onload = function () { onOk(String(fr.result == null ? '' : fr.result)); };
+    fr.onerror = function () { onErr('读取文件失败。'); };
+    fr.readAsText(file);
+  }
+
+  // 校验并规范化备份内容,返回 {ok:true, conns:[...]} 或 {ok:false, reason:'...'}
+  function parseImportPayload(text) {
+    var obj;
+    try { obj = JSON.parse(text); }
+    catch (e) { return { ok: false, reason: '不是合法的 JSON 文件。' }; }
+    if (!obj || typeof obj !== 'object') return { ok: false, reason: '文件内容不是对象。' };
+    if (obj.app !== 'web-ssh') return { ok: false, reason: '这不是 Web SSH 导出的备份文件。' };
+    if (!Array.isArray(obj.conns)) return { ok: false, reason: '备份里没有连接列表。' };
+    if (obj.conns.length > MAX_IMPORT_CONNS) {
+      return { ok: false, reason: '备份含 ' + obj.conns.length + ' 条连接,超过 ' + MAX_IMPORT_CONNS + ' 条上限。' };
+    }
+    var conns = [];
+    obj.conns.forEach(function (src) {
+      if (!src || typeof src !== 'object') return;
+      var host = String(src.host == null ? '' : src.host).trim();
+      if (!host) return;                        // 没有主机地址的记录直接丢弃
+      var item = {};
+      Object.keys(src).forEach(function (k) { if (k !== 'password') item[k] = src[k]; });
+      item.host = host;
+      item.port = parseInt(item.port, 10) || 22;
+      item.user = String(item.user == null ? '' : item.user);
+      item.authType = item.authType === 'key' ? 'key' : 'password';
+      item.name = (item.name == null || item.name === '') ? host : String(item.name);
+      item.command = String(item.command == null ? '' : item.command);
+      item.password = typeof src.password === 'string' ? src.password : '';
+      conns.push(item);
+    });
+    if (!conns.length) return { ok: false, reason: '备份里没有可用的连接记录。' };
+    return { ok: true, conns: conns };
+  }
+
+  // 写进 state.conns 与 localStorage。密码按存储模型拆到独立键,不进 conns 记录。
+  function applyImportedConns(items) {
+    var seen = {};
+    var takenIds = {};
+    state.conns.forEach(function (c) {
+      seen[connSignature(c)] = true;
+      takenIds[c.id] = true;
+    });
+    var added = 0, skipped = 0;
+    items.forEach(function (item) {
+      if (seen[connSignature(item)]) { skipped++; return; }
+      var rec = {};
+      Object.keys(item).forEach(function (k) { if (k !== 'password') rec[k] = item[k]; });
+      if (!rec.id || takenIds[rec.id]) rec.id = uid();   // id 冲突就换新的,绝不覆盖已有记录
+      takenIds[rec.id] = true;
+      if (rec.authType === 'password') {
+        rec.hasPass = !!item.password;
+        rec.savePass = item.savePass !== false && !!item.password;
+        if (item.password) savePassToLS(rec.id, item.password); else clearSavedPass(rec.id);
+      } else {
+        rec.hasPass = false;                              // 与新建密钥连接时保持一致
+      }
+      state.conns.push(rec);
+      seen[connSignature(rec)] = true;
+      added++;
+    });
+    return { added: added, skipped: skipped };
+  }
+
+  function importLocalData() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      readFileText(file, function (text) {
+        var parsed = parseImportPayload(text);
+        if (!parsed.ok) { alert('导入失败:' + parsed.reason); return; }
+        // 先算清楚会跳过多少条,让用户确认后再动本地数据
+        var sig = {};
+        state.conns.forEach(function (c) { sig[connSignature(c)] = true; });
+        var dup = parsed.conns.filter(function (c) { return sig[connSignature(c)]; }).length;
+        var fresh = parsed.conns.length - dup;
+        if (!fresh) {
+          alert('备份里的 ' + parsed.conns.length + ' 条连接都已存在,没有需要导入的内容。');
+          return;
+        }
+        if (!confirm('将导入 ' + fresh + ' 条连接' + (dup ? '(跳过 ' + dup + ' 条已存在的)' : '') + '。继续?')) return;
+        var r = applyImportedConns(parsed.conns);
+        persistConns();
+        renderHome();
+        alert('导入完成:新增 ' + r.added + ' 条' + (r.skipped ? ',跳过 ' + r.skipped + ' 条已存在的' : '') + '。');
+      }, function (reason) { alert('导入失败:' + reason); });
+    });
+    input.click();
   }
 
   // ---------- 连接 ----------
