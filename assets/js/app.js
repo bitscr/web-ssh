@@ -89,6 +89,7 @@
     app.innerHTML =
       '<div class="topbar"><span class="logo">Web<b>SSH</b></span>' +
       '<span class="spacer"></span>' +
+      '<button class="btn" id="btn-export" title="导出本浏览器保存的全部连接信息（含密码/私钥，纯本地生成，不经过服务端）">⬇ 导出</button>' +
       '<button class="btn primary" id="btn-new">+ 新建连接</button></div>' +
       '<div class="split">' +
       '<div class="sidebar">' +
@@ -101,6 +102,7 @@
 
     // 事件
     el('btn-new').addEventListener('click', openEditor);
+    el('btn-export').addEventListener('click', exportLocalData);
     bindConnList();
     bindHomeForm();
     enhancePasswordFields(app);
@@ -504,6 +506,55 @@
       command: q.get('cmd') || ''
     };
     openTerminal(spec, { id: 'url', authType: 'password', savePass: false });
+  }
+
+  // ---------- 导出本地连接信息 ----------
+  // 纯前端:数据直接来自 localStorage,用 Blob + a[download] 触发浏览器下载,
+  // 全程不发起任何网络请求,服务端拿不到也存不下这些内容。
+  function tsStamp() {
+    var d = new Date();
+    function p(n) { return String(n).padStart(2, '0'); }
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  function downloadTextFile(filename, text, mime) {
+    var blob = new Blob([text], { type: (mime || 'application/json') + ';charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // 立即 revoke 在部分浏览器会打断下载,延后回收
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function exportLocalData() {
+    if (!state.conns.length) {
+      alert('还没有保存的连接,没有可导出的内容。');
+      return;
+    }
+    // 连接记录整份拷贝(含 authType/command/hasPass/keyName/privateKey/passphrase 等),
+    // 密码单独存在 webssh.pass.<id>,导出时并回记录里,保证"全部信息"完整。
+    var conns = state.conns.map(function (c) {
+      var item = {};
+      Object.keys(c).forEach(function (k) { item[k] = c[k]; });
+      item.password = getSavedPass(c.id) || '';
+      return item;
+    });
+    var payload = {
+      app: 'web-ssh',
+      schema: 1,
+      exportedAt: new Date().toISOString(),
+      origin: location.origin,
+      count: conns.length,
+      conns: conns
+    };
+    downloadTextFile('webssh-conns-' + tsStamp() + '.json', JSON.stringify(payload, null, 2));
   }
 
   // ---------- 连接 ----------
