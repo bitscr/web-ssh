@@ -127,8 +127,8 @@
         '<button class="btn sm danger act-del" data-act="del" title="删除">✕</button>' +
         '</div>' +
         '<div class="row1"><span class="name">' + esc(c.name || c.host) + '</span>' +
-        (c.authType === 'key' ? '<span class="badge">密钥</span>' : '<span class="badge">密码</span>') +
-        (c.command ? '<span class="badge">命令</span>' : '') +
+        (c.authType === 'key' ? '<span class="badge badge-key">密钥</span>' : '<span class="badge">密码</span>') +
+        (c.command ? '<span class="badge badge-cmd">命令</span>' : '') +
         '</div>' +
         '<div class="host">' + esc(c.user) + '@' + esc(c.host) + ':' + esc(c.port || 22) + '</div>' +
         '</div>';
@@ -138,7 +138,7 @@
   // 主区平铺表单(透明背景,输入框不遮)
   function homeFormHtml() {
     return '<div class="home-form">' +
-      '<div class="home-form-head"><h2>🚀 快速连接</h2>' +
+      '<div class="home-form-head"><h2>快速连接</h2>' +
       '<div class="muted" style="font-size:12px">填写连接信息,点击"连接"自动保存并新开标签页</div></div>' +
       '<div class="err-banner" id="home-err" style="display:none"></div>' +
       '<div class="field"><label>名称(可留空,默认用主机名)</label>' +
@@ -165,7 +165,7 @@
       '<input type="text" id="h-cmd" placeholder="例如:cd /var/www && ls" autocomplete="off"></div>' +
       '<label class="checkline"><input type="checkbox" id="h-savepass" checked> 记住密码</label>' +
       '<div class="home-form-actions">' +
-      '<button class="btn primary btn-lg" id="h-connect">连接并在新标签页打开 ⤴</button>' +
+      '<button class="btn primary btn-lg" id="h-connect">连接并在新标签页打开</button>' +
       '</div></div>';
   }
 
