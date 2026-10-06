@@ -4,15 +4,16 @@
 #
 # 环境:
 #   - Linux + systemd
-#   - 本地构建需 V 工具链(go 1.26,即 /usr/local/bin/go);依赖已缓存时可离线构建
-#   - 将来若配置 CI 发布二进制,可扩展 --download 分支
+#   - 默认从 GitHub Release 下载预编译二进制(无需本机安装 Go 工具链)
+#   - 仓库开发者也可用 --local 在仓库内本地构建
 #
 # 用法:
 #   ./setup.sh [install|update|remove|status] [--port 23456] [--host 127.0.0.1]
+#      [--version vX.Y.Z] [--local] [--download-url URL]
 #
-# 默认行为 = install:
-#   1. 自举:检测 V 工具链,go vet + go build
-#   2. 二进制 → /opt/web-ssh/webssh
+# 默认行为 = install(从最新 Release 下载):
+#   1. 取 GitHub 最新 Release 的 webssh-linux-<arch>(amd64/arm64)
+#   2. 校验 sha256 → 二进制 → /opt/web-ssh/webssh
 #   3. 生成 /etc/systemd/system/web-ssh.service(默认监听 127.0.0.1:23456)
 #   4. systemctl daemon-reload && enable --now && 健康检查
 #
@@ -27,6 +28,7 @@
 #   WEBSSH_INSTALL_DIR  默认 /opt/web-ssh
 #   WEBSSH_SERVICE_FILE 默认 /etc/systemd/system/web-ssh.service
 #   WEBSSH_SERVICE_NAME 默认 web-ssh
+#   WEBSSH_REPO         默认 bitscr/web-ssh(GitHub 仓库,下载用)
 # =============================================================================
 set -euo pipefail
 
@@ -36,10 +38,12 @@ BIN_NAME="webssh"
 : "${WEBSSH_INSTALL_DIR:=/opt/web-ssh}"
 : "${WEBSSH_SERVICE_FILE:=/etc/systemd/system/web-ssh.service}"
 : "${WEBSSH_SERVICE_NAME:=web-ssh}"
+: "${WEBSSH_REPO:=bitscr/web-ssh}"
 
 INSTALL_DIR="$WEBSSH_INSTALL_DIR"
 SERVICE_FILE="$WEBSSH_SERVICE_FILE"
 SERVICE_NAME="$WEBSSH_SERVICE_NAME"
+REPO="$WEBSSH_REPO"
 BACKUP_DIR="${INSTALL_DIR}/backup"
 DEFAULT_PORT=23456
 DEFAULT_HOST="127.0.0.1"
@@ -56,19 +60,22 @@ web-ssh setup.sh — 一键安装 / 更新 / 卸载 web-ssh(systemd 服务)
   ./setup.sh [install|update|remove|status] [选项]
 
 动作(默认 install):
-  install   构建并安装为 systemd 服务,enable --now + 健康检查
-  update    重新构建、备份旧二进制、覆盖安装(mv -f 避免 Text file busy)
+  install   从 GitHub Release 下载并安装为 systemd 服务,enable --now + 健康检查
+  update    下载新版、备份旧二进制、覆盖安装(mv -f 避免 Text file busy)
   remove    停止并禁用服务、删除单元文件(数据在浏览器 localStorage,不受影响)
   status    查看服务状态 + 健康检查
 
 选项:
   --port N                监听端口(默认 23456)
   --host HOST             监听地址(默认 127.0.0.1;对外暴露用 0.0.0.0 并自行加 TLS)
+  --version vX.Y.Z        指定版本(默认最新 Release;latest=最新)
+  --local                 在仓库内本地构建(需 Go 1.26 工具链;开发者用)
+  --download-url URL      直接指定二进制下载地址(覆盖 Release 逻辑)
   --no-origin-check       关闭 WebSocket 同源校验(仅反代场景)
   -h, --help              显示本帮助
 
 环境变量(测试/容器覆盖):
-  WEBSSH_INSTALL_DIR / WEBSSH_SERVICE_FILE / WEBSSH_SERVICE_NAME
+  WEBSSH_INSTALL_DIR / WEBSSH_SERVICE_FILE / WEBSSH_SERVICE_NAME / WEBSSH_REPO
 
 退出码:0=成功 1=错误 2=参数错误 3=健康检查失败
 EOF
@@ -81,6 +88,10 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 ACTION="install"
 PORT="$DEFAULT_PORT"
 HOST="$DEFAULT_HOST"
+VERSION="latest"
+USE_LOCAL=0
+DOWNLOAD_URL=""
+NO_ORIGIN_CHECK=0
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -92,12 +103,67 @@ parse_args() {
       --host)
         [[ $# -ge 2 ]] || die "--host 需要值" 2
         HOST="$2"; shift ;;
+      --version)
+        [[ $# -ge 2 ]] || die "--version 需要值(如 v0.2.0 或 latest)" 2
+        VERSION="$2"; shift ;;
+      --local) USE_LOCAL=1 ;;
+      --download-url)
+        [[ $# -ge 2 ]] || die "--download-url 需要值" 2
+        DOWNLOAD_URL="$2"; shift ;;
       --no-origin-check) NO_ORIGIN_CHECK=1 ;;
       -h|--help|-help) usage ;;
       *) die "未知参数: $1(可用: install|update|remove|status)" 2 ;;
     esac
     shift
   done
+}
+
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *) die "不支持的架构: $(uname -m)(仅 amd64/arm64 有预编译包)" 1 ;;
+  esac
+}
+
+resolve_version() {
+  local v="$1"
+  if [[ "$v" == "latest" ]]; then
+    v="$(curl -fsSL --max-time 15 -o /dev/null -w '%{url_effective}' \
+      "https://github.com/${REPO}/releases/latest" | grep -oE '[^/]+$')"
+    [[ -n "$v" ]] || die "无法获取最新 Release 版本" 1
+    log "最新版本: $v"
+  fi
+  # 归一化:允许 0.2.0 / v0.2.0 两种写法
+  [[ "$v" == v* ]] || v="v$v"
+  echo "$v"
+}
+
+fetch_binary() {
+  local dest="$1" arch url base
+  arch="$(detect_arch)"
+  if [[ -n "$DOWNLOAD_URL" ]]; then
+    url="$DOWNLOAD_URL"
+  else
+    local ver
+    ver="$(resolve_version "$VERSION")"
+    base="https://github.com/${REPO}/releases/download/${ver}/webssh-linux-${arch}"
+    url="$base"
+    log "下载: $base (+ .sha256 校验)"
+    curl -fsSL --max-time 60 -o "${dest}.sha256" "${base}.sha256" \
+      || die "下载 sha256 失败: ${base}.sha256 (版本 $ver 是否存在?)" 1
+  fi
+  curl -fsSL --max-time 120 -o "$dest" "$url" \
+    || die "下载二进制失败: $url" 1
+  chmod +x "$dest"
+  if [[ -f "${dest}.sha256" ]]; then
+    ( cd "$(dirname "$dest")" && sha256sum -c "$(basename "$dest").sha256" ) \
+      || die "sha256 校验失败,停止安装(文件可能损坏或被篡改)" 1
+    log "sha256 校验通过"
+    rm -f "${dest}.sha256"
+  else
+    warn "--download-url 未附带校验文件,跳过 sha256 校验"
+  fi
 }
 
 # ---------- 健康检查 ----------
@@ -117,13 +183,13 @@ health_check() {
   die "健康检查失败: 服务未在 $url 响应(或进程未监听)" 3
 }
 
-# ---------- 构建(V 工具链) ----------
+# ---------- 本地构建(仓库开发者用,V 工具链) ----------
 build_local() {
   local repo_dir
   repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   log "在仓库内构建: $repo_dir"
   if ! have_cmd go; then
-    die "未检测到 V 工具链(go);请先安装 go 1.26+(github.com/vlang-io/v),或改用 --download" 1
+    die "未检测到 Go 工具链;请安装 Go 1.26+(见 README 开发章节),或去掉 --local 改用 Release 下载" 1
   fi
   # 依赖缓存命中时离线可构建;cache miss 则拉取。失败不阻断,后续 build 会报真实错误。
   ( cd "$repo_dir" && go mod download >/dev/null 2>&1 ) || true
@@ -131,20 +197,15 @@ build_local() {
   ( cd "$repo_dir" && go build -o "${INSTALL_DIR}/${BIN_NAME}.new" . )
 }
 
-# 无 CI 发布产物;保留接口供将来对接 release
-build_download() {
-  die "尚无预编译 release,请用 ./setup.sh install(默认本地构建);发布后此分支会自动接管" 1
-}
-
 # ---------- 单元文件 ----------
 write_service() {
   local origin_check=""
-  if [[ "${NO_ORIGIN_CHECK:-0}" == "1" ]]; then
+  if [[ "$NO_ORIGIN_CHECK" == "1" ]]; then
     origin_check=" --no-origin-check"
   fi
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Web SSH gateway (Vlang, single binary)
+Description=Web SSH gateway (Go, single binary)
 After=network.target
 
 [Service]
@@ -167,7 +228,11 @@ install() {
   log "==== 安装 $APP_NAME ===="
   mkdir -p "$INSTALL_DIR" "$BACKUP_DIR"
 
-  if { build_local || build_download; }; then :; fi
+  if [[ "$USE_LOCAL" == "1" ]]; then
+    build_local
+  else
+    fetch_binary "${INSTALL_DIR}/${BIN_NAME}.new"
+  fi
 
   if [[ -f "${INSTALL_DIR}/${BIN_NAME}" ]]; then
     local bak="${BACKUP_DIR}/${BIN_NAME}.$(date +%Y%m%d-%H%M%S)"

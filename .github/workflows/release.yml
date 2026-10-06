@@ -1,0 +1,96 @@
+name: release
+
+# 手动触发:Actions → release → Run workflow → 输入 tag(如 v0.2.0)
+# 产物:GitHub Release + webssh-linux-amd64 / webssh-linux-arm64(+.sha256)+ setup.sh
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag(格式 vX.Y.Z,如 v0.2.0)'
+        required: true
+        type: string
+      prerelease:
+        description: '标记为 pre-release(测试包勾上)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+          - goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Vet + test
+        run: |
+          go vet ./...
+          go test ./internal/...
+          node --test tests/*.test.js
+
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ inputs.tag }} -X main.buildDate=$(date -u +%Y%m%d)" \
+            -o "webssh-linux-${{ matrix.goarch }}" .
+          sha256sum "webssh-linux-${{ matrix.goarch }}" > "webssh-linux-${{ matrix.goarch }}.sha256"
+          cat "webssh-linux-${{ matrix.goarch }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.goarch }}
+          path: |
+            webssh-linux-${{ matrix.goarch }}
+            webssh-linux-${{ matrix.goarch }}.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "tag 格式应为 vX.Y.Z,如 v0.2.0"; exit 1; }
+          ls -la dist/
+          flags=()
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --title "$TAG" --generate-notes "${flags[@]}" \
+            dist/webssh-linux-amd64 dist/webssh-linux-amd64.sha256 \
+            dist/webssh-linux-arm64 dist/webssh-linux-arm64.sha256 \
+            setup.sh
