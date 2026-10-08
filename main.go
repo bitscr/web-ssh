@@ -42,8 +42,13 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	log.Printf("web-ssh %s listening on http://%s (idle=%dm max=%dm)",
-		version, listenAddr, idleMin, maxMin)
+	go func() {
+		log.Printf("web-ssh %s listening on http://%s (idle=%dm max=%dm)",
+			version, listenAddr, idleMin, maxMin)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server failed: %v", err)
+		}
+	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
