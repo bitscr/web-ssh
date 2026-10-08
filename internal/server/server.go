@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -318,21 +317,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// listenAddr 解析监听地址:优先 WEBSSH_LISTEN(host:port),其次 host/port 组合。
-func ListenAddr() string {
-	if v := os.Getenv("WEBSSH_LISTEN"); v != "" {
-		return v
-	}
-	host := os.Getenv("WEBSSH_HOST")
-	if host == "" {
-		host = "127.0.0.1" // 默认仅本机,除非显式设 0.0.0.0
-	}
-	port := os.Getenv("WEBSSH_PORT")
-	if port == "" {
-		port = "23456"
-	}
-	return net.JoinHostPort(host, port)
-}
+// listenAddr 监听地址:本项目单实例部署,写死 0.0.0.0:23456,无 CLI/env 配置
 
 // IntEnv 读取环境整数,非法时回退默认值。
 func IntEnv(key string, def int) int {
