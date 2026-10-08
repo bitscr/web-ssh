@@ -1,8 +1,10 @@
 name: release
 
 # 手动触发:Actions → release → Run workflow → 输入 tag(如 v0.2.0)
-# 产物:GitHub Release + webssh-linux-amd64.tar.gz / webssh-linux-arm64.tar.gz
-#       (内含 webssh 二进制 + install.sh)
+# 产物:GitHub Release 附件
+#   - install.sh / install.sh.sha256       (一键部署脚本,顶层附件)
+#   - webssh-linux-amd64.tar.gz(+.sha256)  (内含 webssh 二进制)
+#   - webssh-linux-arm64.tar.gz(+.sha256)
 
 on:
   workflow_dispatch:
@@ -71,7 +73,7 @@ jobs:
             -o webssh .
           file webssh
 
-      - name: 打包 tar.gz
+      - name: 打包 tar.gz(内含 webssh 二进制)
         run: |
           mkdir -p pkg
           cp webssh pkg/webssh
@@ -90,6 +92,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: 下载两个架构产物
         uses: actions/download-artifact@v4
         with:
@@ -105,6 +109,12 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
 
+      - name: 准备 install.sh 附件
+        run: |
+          cp scripts/install.sh dist/install.sh
+          sha256sum dist/install.sh | sed 's|dist/||' > dist/install.sh.sha256
+          ls -l dist/
+
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -114,6 +124,8 @@ jobs:
           prerelease=""
           [[ "$PRERELEASE" == "true" ]] && prerelease="--prerelease"
           gh release create "$TAG" \
+            dist/install.sh \
+            dist/install.sh.sha256 \
             dist/webssh-linux-amd64.tar.gz \
             dist/webssh-linux-amd64.tar.gz.sha256 \
             dist/webssh-linux-arm64.tar.gz \
